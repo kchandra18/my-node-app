@@ -1,5 +1,5 @@
-# Name of the CI pipeline workflow
-name: CI Pipeline
+# Complete CI/CD Pipeline - Build, Test and Deploy to AWS S3
+name: CI/CD Pipeline
 
 # Define when this workflow triggers
 on:
@@ -33,11 +33,9 @@ jobs:
         uses: actions/checkout@v3
 
       # Step 2: Install Node.js on the runner machine
-      # uses a pre-built action from GitHub Marketplace
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          # Use the Node.js version from env variable
           node-version: ${{ env.NODE_VERSION }}
 
       # Step 3: Install all dependencies from package.json
@@ -68,7 +66,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       # Step 3: Install dependencies on this machine too
-      # Each job gets a fresh machine so we need this again!
       - name: Install dependencies
         run: npm install
 
@@ -80,15 +77,83 @@ jobs:
       - name: Test summary
         run: echo "All tests passed successfully!"
 
-  # Job 3: Notify pipeline completion (only runs if test passes)
-  notify:
+  # Job 3: Deploy to AWS S3 (only runs if test passes)
+  deploy:
     # Run on Ubuntu Linux machine
     runs-on: ubuntu-latest
 
     # Wait for test job to pass first
+    # This ensures we never deploy broken code!
     needs: test
+
+    # Only deploy on push to master (not on pull requests)
+    if: github.event_name == 'push'
+
+    steps:
+      # Step 1: Download code onto runner machine
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # Step 4: Configure AWS credentials
+      # Uses secrets we added to GitHub — never exposed in logs!
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          # Read AWS keys from GitHub Secrets
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Step 5: Verify AWS connection
+      - name: Verify AWS connection
+        run: aws sts get-caller-identity
+
+      # Step 6: Create a simple index.html for our app
+      - name: Create deployment files
+        run: |
+          echo "<html>
+            <head><title>My Node App</title></head>
+            <body>
+              <h1>🎉 My Node.js App</h1>
+              <p>Deployed automatically using GitHub Actions and AWS S3!</p>
+              <p>Build: ${{ github.run_number }}</p>
+              <p>Commit: ${{ github.sha }}</p>
+            </body>
+          </html>" > index.html
+
+      # Step 7: Deploy to AWS S3
+      - name: Deploy to S3
+        run: |
+          aws s3 sync . s3://${{ secrets.S3_BUCKET_NAME }} \
+            --exclude "*" \
+            --include "*.js" \
+            --include "*.json" \
+            --include "*.html" \
+            --exclude "node_modules/*"
+
+      # Step 8: Confirm deployment
+      - name: Deployment complete
+        run: echo "🚀 App successfully deployed to S3 bucket ${{ secrets.S3_BUCKET_NAME }}!"
+
+  # Job 4: Notify pipeline completion
+  notify:
+    # Run on Ubuntu Linux machine
+    runs-on: ubuntu-latest
+
+    # Wait for deploy job to pass
+    needs: deploy
 
     steps:
       # Step 1: Notify pipeline completed
       - name: Notify success
-        run: echo "CI Pipeline completed! App is ready for deployment!"
+        run: echo "✅ CI/CD Pipeline completed! App is live on AWS S3!"
