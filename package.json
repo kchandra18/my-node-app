@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "description": "My Node.js App built with GitHub Actions and AWS",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "jest",
-    "start": "node index.js"
+    "start": "node index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "repository": {
     "type": "git",
@@ -15,6 +18,8 @@
   "author": "kchandra18",
   "license": "ISC",
   "devDependencies": {
-    "jest": "^30.2.0"
+    "@eslint/js": "^9.0.0",
+    "eslint": "^10.0.3",
+    "jest": "^29.0.0"
   }
 }

@@ -1,94 +1,25 @@
-# Complete CI/CD Pipeline - Build, Test and Deploy to AWS S3
+# Complete CI/CD Pipeline with Security Scanning and Caching
 name: CI/CD Pipeline
 
 # Define when this workflow triggers
 on:
-  # Trigger on push to master branch
   push:
     branches:
       - master
-  # Trigger on pull request to master branch
   pull_request:
     branches:
       - master
-  # Allow manual trigger from GitHub UI
   workflow_dispatch:
 
 # Global environment variables
 env:
-  # Node.js version to use
   NODE_VERSION: '20.x'
 
-# Define all jobs
 jobs:
 
   # Job 1: Build the application
   build:
-    # Run on Ubuntu Linux machine
     runs-on: ubuntu-latest
-
-    steps:
-      # Step 1: Download code onto runner machine
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      # Step 2: Install Node.js on the runner machine
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      # Step 3: Install all dependencies from package.json
-      - name: Install dependencies
-        run: npm install
-
-      # Step 4: Verify installed packages
-      - name: List installed packages
-        run: npm list --depth=0
-
-  # Job 2: Run tests (only runs if build passes)
-  test:
-    # Run on Ubuntu Linux machine
-    runs-on: ubuntu-latest
-
-    # Wait for build job to pass first
-    needs: build
-
-    steps:
-      # Step 1: Download code onto this runner machine
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      # Step 2: Install Node.js on this runner machine
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      # Step 3: Install dependencies on this machine too
-      - name: Install dependencies
-        run: npm install
-
-      # Step 4: Run Jest tests
-      - name: Run tests
-        run: npm test
-
-      # Step 5: Print test summary
-      - name: Test summary
-        run: echo "All tests passed successfully!"
-
-  # Job 3: Deploy to AWS S3 (only runs if test passes)
-  deploy:
-    # Run on Ubuntu Linux machine
-    runs-on: ubuntu-latest
-
-    # Wait for test job to pass first
-    # This ensures we never deploy broken code!
-    needs: test
-
-    # Only deploy on push to master (not on pull requests)
-    if: github.event_name == 'push'
-
     steps:
       # Step 1: Download code onto runner machine
       - name: Checkout code
@@ -99,17 +30,126 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
+          # Cache npm dependencies automatically
+          # uses package-lock.json as cache key
+          # If package-lock.json hasn't changed = use cache!
+          cache: 'npm'
 
       # Step 3: Install dependencies
+      # If cache exists this will be very fast!
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+        # npm ci is faster and more reliable than npm install
+        # It installs exact versions from package-lock.json
 
-      # Step 4: Configure AWS credentials
-      # Uses secrets we added to GitHub — never exposed in logs!
+      # Step 4: Verify installed packages
+      - name: List installed packages
+        run: npm list --depth=0
+
+  # Job 2: Security Scanning (runs after build)
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      # Step 1: Download code onto runner machine
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Node.js with cache
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Restore cache from build job
+          # Same cache key = instant restore!
+          cache: 'npm'
+
+      # Step 3: Install dependencies using cache
+      - name: Install dependencies
+        run: npm ci
+
+      # Step 4: Scan dependencies for vulnerabilities
+      - name: Scan dependencies for vulnerabilities
+        run: npm audit --audit-level=high
+
+      # Step 5: Scan for hardcoded secrets
+      - name: Scan for hardcoded secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
+
+      # Step 6: Scan code for security issues
+      - name: Scan code for security issues
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
+
+      # Step 7: Security scan summary
+      - name: Security scan complete
+        run: echo "✅ All security scans passed!"
+
+  # Job 3: Run tests (only runs if security scan passes)
+  test:
+    runs-on: ubuntu-latest
+    needs: security-scan
+
+    steps:
+      # Step 1: Download code onto runner machine
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Node.js with cache
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Restore cache from previous jobs
+          # node_modules already cached = super fast!
+          cache: 'npm'
+
+      # Step 3: Install dependencies using cache
+      - name: Install dependencies
+        run: npm ci
+
+      # Step 4: Run Jest tests
+      - name: Run tests
+        run: npm test
+
+      # Step 5: Print test summary
+      - name: Test summary
+        run: echo "✅ All tests passed successfully!"
+
+  # Job 4: Deploy to AWS S3 (only runs if test passes)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+
+    # Only deploy on push to master not on pull requests
+    if: github.event_name == 'push'
+
+    steps:
+      # Step 1: Download code onto runner machine
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Node.js with cache
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Restore cache for deploy job too
+          cache: 'npm'
+
+      # Step 3: Install dependencies using cache
+      - name: Install dependencies
+        run: npm ci
+
+      # Step 4: Configure AWS credentials from GitHub Secrets
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          # Read AWS keys from GitHub Secrets
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
@@ -118,7 +158,7 @@ jobs:
       - name: Verify AWS connection
         run: aws sts get-caller-identity
 
-      # Step 6: Create a simple index.html for our app
+      # Step 6: Create deployment files
       - name: Create deployment files
         run: |
           echo "<html>
@@ -131,7 +171,7 @@ jobs:
             </body>
           </html>" > index.html
 
-      # Step 7: Deploy to AWS S3
+      # Step 7: Deploy files to AWS S3
       - name: Deploy to S3
         run: |
           aws s3 sync . s3://${{ secrets.S3_BUCKET_NAME }} \
@@ -143,17 +183,14 @@ jobs:
 
       # Step 8: Confirm deployment
       - name: Deployment complete
-        run: echo "🚀 App successfully deployed to S3 bucket ${{ secrets.S3_BUCKET_NAME }}!"
+        run: echo "🚀 App deployed to S3 bucket ${{ secrets.S3_BUCKET_NAME }}!"
 
-  # Job 4: Notify pipeline completion
+  # Job 5: Notify pipeline completion
   notify:
-    # Run on Ubuntu Linux machine
     runs-on: ubuntu-latest
-
-    # Wait for deploy job to pass
     needs: deploy
 
     steps:
       # Step 1: Notify pipeline completed
       - name: Notify success
-        run: echo "✅ CI/CD Pipeline completed! App is live on AWS S3!"
+        run: echo "✅ CI/CD Pipeline with Security + Cache completed!"
