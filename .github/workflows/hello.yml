@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Print Hello World
-        run: ech "Hello World! My first GitHub Action!"
+        run: echo "Hello World! My first GitHub Action!"
 
       - name: Print Date
         run: date
