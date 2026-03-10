@@ -45,7 +45,7 @@ jobs:
       # Step 3: List all files in the current directory
       # Useful to verify checkout worked correctly
       - name: List files
-        run: lss -la
+        run: ls -la
 
   # Second job — named 'test'
   test:
