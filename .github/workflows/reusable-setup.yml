@@ -1,0 +1,77 @@
+# Reusable workflow for setting up Node.js environment
+# This workflow can be called by any other workflow
+# instead of repeating the same setup steps everywhere
+name: Reusable Node.js Setup
+
+# 'workflow_call' makes this workflow reusable
+# Other workflows can call this using 'uses' keyword
+on:
+  workflow_call:
+    # Inputs are parameters this workflow accepts
+    # Calling workflow can pass values to these inputs
+    inputs:
+      # Node.js version to install
+      node-version:
+        # Description shown in GitHub UI
+        description: 'Node.js version to use'
+        # This input is required - calling workflow must provide it
+        required: true
+        # Input type is string
+        type: string
+      # Whether to run tests or not
+      run-tests:
+        description: 'Whether to run tests'
+        # This input is optional
+        required: false
+        # Default value if not provided
+        default: false
+        # Input type is boolean
+        type: boolean
+
+    # Outputs are values this workflow returns
+    # Calling workflow can read these values
+    outputs:
+      # Output the Node.js version that was installed
+      node-version-used:
+        description: 'The Node.js version that was installed'
+        # Read value from the setup job output
+        value: ${{ jobs.setup.outputs.node-version-used }}
+
+# Jobs in this reusable workflow
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+
+    # Define outputs for this job
+    outputs:
+      # Capture the Node.js version output
+      node-version-used: ${{ steps.node-version.outputs.version }}
+
+    steps:
+      # Step 1: Download code onto runner machine
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Node.js using version from input
+      # ${{ inputs.node-version }} reads the input parameter
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Step 4: Capture installed Node.js version as output
+      # This output will be available to the calling workflow
+      - name: Capture Node.js version
+        id: node-version
+        run: echo "version=$(node --version)" >> $GITHUB_OUTPUT
+
+      # Step 5: Run tests only if run-tests input is true
+      # ${{ inputs.run-tests }} reads the boolean input
+      - name: Run tests
+        if: ${{ inputs.run-tests == true }}
+        run: npm test
