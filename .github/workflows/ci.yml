@@ -1,19 +1,36 @@
-# Job 1: Build and test on multiple Node.js versions simultaneously
+# Complete CI/CD Pipeline with Matrix Builds, Lint, Security, Test and Deploy
+name: CI/CD Pipeline
+
+# Define when this workflow triggers
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+# Global environment variables
+env:
+  NODE_VERSION: '20.x'
+
+# All jobs defined here
+jobs:
+
+  # Job 1: Build on multiple Node.js versions simultaneously
   build:
     runs-on: ubuntu-latest
 
-    # Matrix strategy runs this job multiple times
-    # once for each version in the matrix
+    # Matrix runs this job once per Node.js version in parallel
     strategy:
-      # If one version fails do NOT cancel others
-      # Let all versions complete so we see all failures
+      # Don't cancel other versions if one fails
       fail-fast: false
       matrix:
-        # Define Node.js versions to test on
-        # This will create 3 separate jobs running in parallel!
+        # Test on Node.js 18, 20 and 22 simultaneously
         node-version: [18, 20, 22]
 
-    # Job name will show as "build (18)", "build (20)", "build (22)"
+    # Job name shows version e.g. "build (node 18)"
     name: build (node ${{ matrix.node-version }})
 
     steps:
@@ -21,11 +38,10 @@
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Install the specific Node.js version from matrix
+      # Install specific Node.js version from matrix
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
-          # Use the current matrix version instead of fixed version
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
@@ -33,10 +49,151 @@
       - name: Install dependencies
         run: npm ci
 
-      # Print which Node.js version we're running on
+      # Show which Node.js version is running
       - name: Show Node.js version
         run: node --version
 
       # List installed packages
       - name: List installed packages
         run: npm list --depth=0
+
+  # Job 2: Lint the code (runs after all build matrix jobs pass)
+  lint:
+    runs-on: ubuntu-latest
+    # Wait for ALL matrix build jobs to pass
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Lint summary
+        run: echo "✅ Code quality check passed!"
+
+  # Job 3: Security Scanning (runs after lint)
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan dependencies for vulnerabilities
+        run: npm audit --audit-level=high
+
+      - name: Scan for hardcoded secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --only-verified
+
+      - name: Scan code for security issues
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
+
+      - name: Security scan complete
+        run: echo "✅ All security scans passed!"
+
+  # Job 4: Run tests (runs after security scan)
+  test:
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Test summary
+        run: echo "✅ All tests passed successfully!"
+
+  # Job 5: Deploy to AWS S3 (runs after test)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS connection
+        run: aws sts get-caller-identity
+
+      - name: Create deployment files
+        run: |
+          echo "<html>
+            <head><title>My Node App</title></head>
+            <body>
+              <h1>🎉 My Node.js App</h1>
+              <p>Deployed automatically using GitHub Actions and AWS S3!</p>
+              <p>Build: ${{ github.run_number }}</p>
+              <p>Commit: ${{ github.sha }}</p>
+            </body>
+          </html>" > index.html
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync . s3://${{ secrets.S3_BUCKET_NAME }} \
+            --exclude "*" \
+            --include "*.js" \
+            --include "*.json" \
+            --include "*.html" \
+            --exclude "node_modules/*"
+
+      - name: Deployment complete
+        run: echo "🚀 App deployed to S3 bucket ${{ secrets.S3_BUCKET_NAME }}!"
+
+  # Job 6: Notify pipeline completion
+  notify:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Notify success
+        run: echo "✅ CI/CD Pipeline with Matrix Builds completed!"
