@@ -1,0 +1,48 @@
+# Caller workflow that uses the reusable setup workflow
+# Instead of repeating setup steps we just call the reusable workflow
+name: Caller Workflow
+
+# Trigger on push to master
+on:
+  push:
+    branches:
+      - master
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+
+  # Job 1: Call reusable workflow just to setup and install
+  # No tests - just verify setup works
+  setup-only:
+    # 'uses' calls the reusable workflow
+    # format: ./.github/workflows/filename.yml
+    uses: ./.github/workflows/reusable-setup.yml
+    with:
+      # Pass Node.js version as input
+      node-version: '20'
+      # Don't run tests in this job
+      run-tests: false
+
+  # Job 2: Call reusable workflow with tests enabled
+  setup-and-test:
+    # This job also calls the same reusable workflow
+    # but this time with run-tests: true
+    uses: ./.github/workflows/reusable-setup.yml
+    with:
+      # Pass Node.js version as input
+      node-version: '20'
+      # Run tests this time
+      run-tests: true
+
+  # Job 3: Read the output from reusable workflow
+  # This job runs after setup-only completes
+  print-output:
+    runs-on: ubuntu-latest
+    # Wait for setup-only job to finish
+    needs: setup-only
+    steps:
+      # Read the output returned by reusable workflow
+      # needs.setup-only.outputs reads output from that job
+      - name: Print Node.js version used
+        run: echo "Node.js version used was ${{ needs.setup-only.outputs.node-version-used }}"
