@@ -1,0 +1,58 @@
+# Composite Action for setting up Node.js app
+# This action bundles multiple steps into one reusable action
+# Can be called from any job using 'uses' keyword
+
+# Name of this composite action
+name: Setup Node.js App
+
+# Description shown in GitHub Marketplace
+description: 'Sets up Node.js, installs dependencies and optionally runs tests'
+
+# Inputs this action accepts
+inputs:
+  # Node.js version to install
+  node-version:
+    description: 'Node.js version to use'
+    required: true
+    default: '20'
+  # Whether to run tests
+  run-tests:
+    description: 'Whether to run tests'
+    required: false
+    default: 'false'
+
+# Outputs this action returns
+outputs:
+  # Return the Node.js version that was installed
+  node-version-used:
+    description: 'Node.js version that was installed'
+    value: ${{ steps.get-version.outputs.version }}
+
+# This is what makes it a COMPOSITE action
+runs:
+  using: 'composite'
+  steps:
+    # Step 1: Install Node.js
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'npm'
+
+    # Step 2: Install dependencies
+    - name: Install dependencies
+      # shell must be specified in composite actions!
+      shell: bash
+      run: npm ci
+
+    # Step 3: Capture Node.js version as output
+    - name: Get Node.js version
+      id: get-version
+      shell: bash
+      run: echo "version=$(node --version)" >> $GITHUB_OUTPUT
+
+    # Step 4: Run tests only if input is true
+    - name: Run tests
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: npm test

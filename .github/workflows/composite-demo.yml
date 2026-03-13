@@ -1,0 +1,57 @@
+# Workflow demonstrating Composite Action usage
+# Instead of repeating setup steps in every job
+# we call our composite action with one line!
+name: Composite Action Demo
+
+# Trigger on push to master
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+
+  # Job 1: Use composite action just for setup
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout code first
+      # Composite action needs code to be present!
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Call our composite action!
+      # Instead of 3 separate steps we just call this one!
+      # ./.github/actions/setup-node-app points to our action.yml
+      - name: Setup Node.js App
+        uses: ./.github/actions/setup-node-app
+        with:
+          node-version: '20'
+          run-tests: 'false'
+
+      # Step 3: Use the output from composite action
+      - name: Show Node.js version
+        run: echo "Setup complete!"
+
+  # Job 2: Use composite action with tests enabled
+  test:
+    runs-on: ubuntu-latest
+    # Wait for build job to pass
+    needs: build
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Call composite action with tests enabled
+      # Same action, different input!
+      - name: Setup and Test
+        uses: ./.github/actions/setup-node-app
+        with:
+          node-version: '20'
+          run-tests: 'true'
+
+      # Step 3: Confirm everything passed
+      - name: All done
+        run: echo "✅ Build and tests completed using Composite Action!"
